@@ -1,6 +1,6 @@
 'use client';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import {
   Typography,
   Card,
@@ -26,7 +26,8 @@ import {
 } from '@mui/icons-material';
 import type { IconData } from '@/types';
 
-export default function SearchPage() {
+// 将使用 useSearchParams 的逻辑提取到单独的组件中
+function SearchContent() {
   const searchParams = useSearchParams();
   const query = searchParams.get('q');
   const [icons, setIcons] = useState<IconData[]>([]);
@@ -370,5 +371,43 @@ export default function SearchPage() {
         </Fade>
       )}
     </Container>
+  );
+}
+
+// 加载状态的 fallback 组件
+function SearchFallback() {
+  return (
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Box sx={{ mb: 4, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
+          <SearchIcon sx={{ fontSize: 32, color: 'primary.main', mr: 1 }} />
+          <Typography 
+            variant="h3" 
+            component="h1"
+            sx={{ 
+              fontWeight: 700,
+              background: 'linear-gradient(45deg, #1976d2 30%, #42a5f5 90%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            Graph Search
+          </Typography>
+        </Box>
+      </Box>
+      
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+        <CircularProgress size={48} thickness={4} />
+      </Box>
+    </Container>
+  );
+}
+
+// 主组件
+export default function SearchPage() {
+  return (
+    <Suspense fallback={<SearchFallback />}>
+      <SearchContent />
+    </Suspense>
   );
 }
