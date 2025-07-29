@@ -7,14 +7,14 @@ export async function GET(req: Request) {
   const query = searchParams.get('q');
 
   const API_KEY = process.env.ICONFINDER_API_KEY;
-  console.log("Query:", query);
-  console.log("API_KEY:", API_KEY);
+//   console.log("Query:", query);
+//   console.log("API_KEY:", API_KEY);
 
   if (!query || !API_KEY) {
     return NextResponse.json({ error: 'Missing query or API key' }, { status: 400 });
   }
 
-  const res = await fetch(`https://api.iconfinder.com/v4/icons/search?query=${query}&count=20`, {
+  const res = await fetch(`https://api.iconfinder.com/v4/icons/search?query=${query}`, {
     headers: {
       Authorization: `Bearer ${API_KEY}`,
     },

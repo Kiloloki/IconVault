@@ -3,6 +3,7 @@
 // Import necessary hooks and components from Next.js and React
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
 
 // Import Material-UI components for UI design
 import {
@@ -20,6 +21,7 @@ import {
   Zoom,
   Alert,
   Skeleton,
+  Button,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 
@@ -29,6 +31,7 @@ import {
   Download as DownloadIcon,
   Favorite as FavoriteIcon,
   FavoriteBorder as FavoriteBorderIcon,
+  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 
 // Import custom type definitions
@@ -40,17 +43,48 @@ import type { IconData } from '@/types';
  * This component handles the main search functionality and icon display.
  * It's separated from the main component because it uses useSearchParams(),
  * which requires being wrapped in a Suspense boundary for proper SSR/SSG support.
+ * Now includes integrated favorites management with localStorage persistence.
  */
 function SearchContent() {
   // Extract search parameters from URL using Next.js hook
   const searchParams = useSearchParams();
   const query = searchParams.get('q'); // Get the 'q' parameter from URL
+  
+  // Router for navigation
+  const router = useRouter();
 
   // State management for component data and UI states
   const [icons, setIcons] = useState<IconData[]>([]); // Store fetched icons
   const [loading, setLoading] = useState(false); // Track loading state
-  const [favorites, setFavorites] = useState<Set<string>>(new Set()); // Store user's favorite icons
   const [error, setError] = useState<string | null>(null); // Store error messages
+  const [favorites, setFavorites] = useState<Set<string>>(new Set()); // Store favorite icon IDs
+  const [favoriteIcons, setFavoriteIcons] = useState<IconData[]>([]); // Store complete favorite icons data
+  const [isClient, setIsClient] = useState(false); // Track if we're on client side
+
+  /**
+   * Initialize client-side state and load favorites from localStorage
+   */
+  useEffect(() => {
+    setIsClient(true);
+    
+    try {
+      // Load favorite IDs from localStorage
+      const savedFavorites = localStorage.getItem('iconFavorites');
+      if (savedFavorites) {
+        const favoriteIds = JSON.parse(savedFavorites);
+        setFavorites(new Set(favoriteIds));
+      }
+
+      // Load favorite icons data from localStorage
+      const savedIconsData = localStorage.getItem('favoriteIconsData');
+      if (savedIconsData) {
+        const iconsData = JSON.parse(savedIconsData);
+        setFavoriteIcons(iconsData);
+      }
+    } catch (error) {
+      console.error('Error loading favorites from localStorage:', error);
+    }
+  }, []);
 
   /**
    * Effect hook to fetch icons when query changes
@@ -85,21 +119,111 @@ function SearchContent() {
   }, [query]); // Dependency array - effect runs when query changes
 
   /**
-   * Toggle favorite status for an icon
-   * Manages the favorites set by adding/removing icon IDs
+   * Save favorites to localStorage
    * 
-   * @param iconId - The unique identifier for the icon
+   * @param newFavorites - Set of favorite icon IDs
+   * @param newIconsData - Array of complete icon data
    */
-  const toggleFavorite = (iconId: string) => {
+  const saveFavoritesToStorage = (newFavorites: Set<string>, newIconsData: IconData[]) => {
+    if (!isClient) return;
+    
+    try {
+      localStorage.setItem('iconFavorites', JSON.stringify([...newFavorites]));
+      localStorage.setItem('favoriteIconsData', JSON.stringify(newIconsData));
+    } catch (error) {
+      console.error('Error saving favorites to localStorage:', error);
+    }
+  };
+
+  /**
+   * Toggle favorite status for an icon
+   * 
+   * @param icon - The icon data object to toggle favorite status
+   * @param e - The mouse event to prevent default behavior
+   */
+  const handleToggleFavorite = (icon: IconData, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Generate a unique ID if the icon doesn't have one
+    let iconId = icon.id?.toString();
+    if (!iconId) {
+      // Create a unique ID based on icon properties
+      iconId = `icon_${icon.name || 'unknown'}_${icon.tags?.[0] || 'notag'}_${Date.now()}`;
+      // Add the generated ID to the icon object
+      icon.id = iconId;
+      console.log('Generated ID for icon:', iconId);
+    }
+
+    console.log('Toggling favorite for icon:', iconId, 'Current favorites:', [...favorites]);
+
     setFavorites(prev => {
-      const newFavorites = new Set(prev); // Create a new Set to avoid mutation
+      const newFavorites = new Set(prev);
+      let newIconsData = [...favoriteIcons];
+      
       if (newFavorites.has(iconId)) {
-        newFavorites.delete(iconId); // Remove from favorites
+        // Remove from favorites
+        console.log('Removing from favorites:', iconId);
+        newFavorites.delete(iconId);
+        newIconsData = favoriteIcons.filter(favIcon => {
+          const favIconId = favIcon.id?.toString() || `icon_${favIcon.name || 'unknown'}_${favIcon.tags?.[0] || 'notag'}`;
+          return favIconId !== iconId;
+        });
       } else {
-        newFavorites.add(iconId); // Add to favorites
+        // Add to favorites
+        console.log('Adding to favorites:', iconId);
+        newFavorites.add(iconId);
+        // Check if icon already exists to prevent duplicates
+        const iconExists = favoriteIcons.some(favIcon => {
+          const favIconId = favIcon.id?.toString() || `icon_${favIcon.name || 'unknown'}_${favIcon.tags?.[0] || 'notag'}`;
+          return favIconId === iconId;
+        });
+        if (!iconExists) {
+          newIconsData = [...favoriteIcons, icon];
+        }
       }
+      
+      console.log('New favorites:', [...newFavorites]);
+      console.log('New icons data count:', newIconsData.length);
+      
+      setFavoriteIcons(newIconsData);
+      saveFavoritesToStorage(newFavorites, newIconsData);
       return newFavorites;
     });
+  };
+
+  /**
+   * Check if an icon is in favorites
+   * 
+   * @param iconId - The ID of the icon to check
+   * @returns boolean indicating if the icon is favorited
+   */
+  const isFavorite = (iconId: string) => {
+    return favorites.has(iconId);
+  };
+
+  /**
+   * Generate or get icon ID for consistent identification
+   * 
+   * @param icon - The icon object
+   * @param index - The index as fallback
+   * @returns string - unique identifier for the icon
+   */
+  const getIconId = (icon: IconData, index: number) => {
+    if (icon.id) {
+      return icon.id.toString();
+    }
+    // Generate a consistent ID based on icon properties
+    return `icon_${icon.name || 'unknown'}_${icon.tags?.[0] || 'notag'}_${index}`;
+  };
+
+  /**
+   * Get the total count of favorite icons
+   * 
+   * @returns Number of favorite icons
+   */
+  const getFavoriteCount = () => {
+    return favorites.size;
   };
 
   /**
@@ -127,6 +251,20 @@ function SearchContent() {
       link.click(); // Trigger download
       document.body.removeChild(link); // Clean up
     }
+  };
+
+  /**
+   * Navigate back to home page
+   */
+  const handleGoHome = () => {
+    router.push('/');
+  };
+
+  /**
+   * Navigate to favorites page
+   */
+  const handleGoToFavorites = () => {
+    router.push('/favorites');
   };
 
   /**
@@ -163,22 +301,66 @@ function SearchContent() {
     <Container maxWidth="xl" sx={{ py: 4 }}>
       {/* Search Header Section */}
       <Box sx={{ mb: 4, textAlign: 'center' }}>
-        {/* Title with search icon */}
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
-          <SearchIcon sx={{ fontSize: 32, color: 'primary.main', mr: 1 }} />
-          <Typography 
-            variant="h3" 
-            component="h1"
+        {/* Navigation and title */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          {/* Back button */}
+          <IconButton 
+            onClick={handleGoHome}
             sx={{ 
-              fontWeight: 700,
-              // Gradient text effect
-              background: 'linear-gradient(45deg, #1976d2 30%, #42a5f5 90%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
+              bgcolor: 'rgba(0,0,0,0.04)',
+              '&:hover': { bgcolor: 'rgba(0,0,0,0.08)' }
             }}
           >
-            Graph Search
-          </Typography>
+            <ArrowBackIcon />
+          </IconButton>
+
+          {/* Title */}
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexGrow: 1 }}>
+            <SearchIcon sx={{ fontSize: 32, color: 'primary.main', mr: 1 }} />
+            <Typography 
+              variant="h3" 
+              component="h1"
+              sx={{ 
+                fontWeight: 700,
+                // Gradient text effect
+                background: 'linear-gradient(45deg, #1976d2 30%, #42a5f5 90%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              Graph Search
+            </Typography>
+          </Box>
+
+          {/* Favorites button */}
+          <Button
+            variant="outlined"
+            startIcon={<FavoriteIcon />}
+            onClick={handleGoToFavorites}
+            sx={{
+              borderColor: '#1976d2', // Blue to match theme
+              color: '#1976d2',
+              '&:hover': {
+                borderColor: '#1565c0',
+                backgroundColor: 'rgba(25, 118, 210, 0.04)',
+              }
+            }}
+          >
+            {getFavoriteCount() > 0 && (
+              <Chip 
+                label={getFavoriteCount()} 
+                size="small" 
+                sx={{ 
+                  ml: 1, 
+                  bgcolor: '#1976d2', // Blue to match theme
+                  color: 'white',
+                  fontSize: '0.75rem',
+                  height: 20
+                }} 
+              />
+            )}
+            Favorites
+          </Button>
         </Box>
         
         {/* Display current search query */}
@@ -249,8 +431,8 @@ function SearchContent() {
                   // Extract icon data for rendering
                   const largestRaster = icon.raster_sizes?.[icon.raster_sizes.length - 1];
                   const previewUrl = largestRaster?.formats?.[0]?.preview_url;
-                  const iconId = icon.id?.toString() || index.toString();
-                  const isFavorite = favorites.has(iconId);
+                  const iconId = getIconId(icon, index); // Use the new helper function
+                  const isIconFavorite = isFavorite(iconId);
 
                   return (
                     <Grid key={iconId} size={{ xs: 6, sm: 4, md: 3, lg: 2 }}>
@@ -291,14 +473,10 @@ function SearchContent() {
                             }}
                           >
                             {/* Favorite toggle button */}
-                            <Tooltip title={isFavorite ? "Cancel Favorite" : "Favorite"}>
+                            <Tooltip title={isIconFavorite ? "Remove from Favorites" : "Add to Favorites"}>
                               <IconButton
                                 size="small"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  toggleFavorite(iconId);
-                                }}
+                                onClick={(e) => handleToggleFavorite(icon, e)}
                                 sx={{
                                   bgcolor: 'rgba(255, 255, 255, 0.9)',
                                   backdropFilter: 'blur(8px)', // Glass effect
@@ -307,7 +485,7 @@ function SearchContent() {
                                   },
                                 }}
                               >
-                                {isFavorite ? (
+                                {isIconFavorite ? (
                                   <FavoriteIcon sx={{ fontSize: 16, color: 'error.main' }} />
                                 ) : (
                                   <FavoriteBorderIcon sx={{ fontSize: 16 }} />
@@ -373,6 +551,26 @@ function SearchContent() {
                                   },
                                 }}
                               />
+                              
+                              {/* Favorite indicator */}
+                              {isIconFavorite && (
+                                <Box
+                                  sx={{
+                                    position: 'absolute',
+                                    top: 8,
+                                    left: 8,
+                                    bgcolor: 'rgba(25, 118, 210, 0.9)', // Blue to match theme
+                                    borderRadius: '50%',
+                                    width: 24,
+                                    height: 24,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  <FavoriteIcon sx={{ fontSize: 14, color: 'white' }} />
+                                </Box>
+                              )}
                             </Box>
 
                             {/* Icon information section */}
